@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ClipForge — Turn long videos into viral shorts</title>
-<meta name="description" content="Paste a YouTube link or upload a video. AI finds the most viral moments and turns them into captioned vertical clips.">
+<meta name="description" content="Upload a video. AI finds the most viral moments and turns them into captioned vertical clips.">
 <style>
 :root{--bg:#0b0b10;--panel:#14141c;--line:#262633;--text:#f2f2f7;--mute:#9a9aac;--accent:#7c5cff;--accent2:#ff4f9a;--ok:#2ecc8f}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -24,7 +24,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:20p
 .row{display:flex;gap:10px}
 input[type=url]{flex:1;padding:15px 16px;border-radius:12px;border:1px solid var(--line);background:#0f0f15;color:var(--text);font-size:15px;outline:none}
 input[type=url]:focus{border-color:var(--accent)}
-.drop{border:2px dashed #34344a;border-radius:12px;padding:28px;text-align:center;color:var(--mute);cursor:pointer}
+.drop{display:block;border:2px dashed #34344a;border-radius:12px;padding:28px;text-align:center;color:var(--mute);cursor:pointer}
 .drop.has{border-color:var(--accent);color:var(--text)}
 .opts{display:flex;align-items:center;justify-content:space-between;margin-top:14px;color:var(--mute);font-size:14px;gap:10px;flex-wrap:wrap}
 select{background:#0f0f15;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
@@ -59,20 +59,13 @@ footer{text-align:center;color:var(--mute);font-size:12px;padding:30px}
 
 <section class="hero">
   <h1>One long video.<br><em>Ten viral shorts.</em></h1>
-  <p>Paste a YouTube link or upload a video. AI finds the best moments and turns them into captioned 9:16 clips.</p>
+  <p>Upload a video. AI finds the best moments and turns them into captioned 9:16 clips.</p>
 </section>
 
 <div class="card">
-  <div class="tabs">
-    <button class="tab on" data-t="link">YouTube link</button>
-    <button class="tab" data-t="file">Upload video</button>
-  </div>
-  <div id="linkBox" class="row">
-    <input id="url" type="url" placeholder="https://www.youtube.com/watch?v=...">
-  </div>
-  <label id="fileBox" class="drop" style="display:none">
+  <label id="fileBox" class="drop">
     <input id="file" type="file" accept="video/*" hidden>
-    <span id="fileName">Click to choose a video (MP4, MOV, up to 90 min)</span>
+    <span id="fileName">Click to choose a video (MP4, MOV, up to 30 min, 300 MB)</span>
   </label>
   <div class="opts">
     <label>Clips: <select id="n"><option>3</option><option selected>5</option><option>8</option><option>10</option></select></label>
@@ -88,7 +81,7 @@ footer{text-align:center;color:var(--mute);font-size:12px;padding:30px}
 <div class="grid" id="grid"></div>
 
 <section class="steps" id="how">
-  <div class="step"><b>1. Paste or upload</b><span>Any talking video: podcasts, interviews, vlogs, lectures.</span></div>
+  <div class="step"><b>1. Upload</b><span>Any talking video: podcasts, interviews, vlogs, lectures.</span></div>
   <div class="step"><b>2. AI finds the hooks</b><span>Every moment is scored for hook, emotion and shareability.</span></div>
   <div class="step"><b>3. Download and post</b><span>Vertical 9:16 with captions, ready for Reels, Shorts and TikTok.</span></div>
 </section>
@@ -98,15 +91,8 @@ footer{text-align:center;color:var(--mute);font-size:12px;padding:30px}
 <script>
 const API = window.CLIP_API || "";
 const $ = id => document.getElementById(id);
-let mode = "link";
-const STAGES = {queued:5, downloading:15, transcribing:35, "finding viral moments":55};
+const STAGES = {queued:5, downloading:10, transcribing:35, "finding viral moments":55};
 
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-  document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
-  t.classList.add("on"); mode = t.dataset.t;
-  $("linkBox").style.display = mode === "link" ? "flex" : "none";
-  $("fileBox").style.display = mode === "file" ? "block" : "none";
-});
 $("file").onchange = () => {
   const f = $("file").files[0];
   $("fileName").textContent = f ? `${f.name} (${(f.size/1e6).toFixed(0)} MB)` : "Click to choose a video";
@@ -131,17 +117,11 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 $("go").onclick = async () => {
   const fd = new FormData();
   fd.append("n_clips", $("n").value);
-  if (mode === "link") {
-    const u = $("url").value.trim();
-    if (!/^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//.test(u)) return setStatus("Enter a valid YouTube link.", 0, true);
-    fd.append("url", u);
-  } else {
-    const f = $("file").files[0];
-    if (!f) return setStatus("Choose a video file first.", 0, true);
-    fd.append("file", f);
-  }
+  const f = $("file").files[0];
+  if (!f) return setStatus("Choose a video file first.", 0, true);
+  fd.append("file", f);
   $("go").disabled = true; $("grid").innerHTML = "";
-  setStatus(mode === "file" ? "Uploading…" : "Queued…", 3);
+  setStatus("Uploading…", 3);
   try {
     const r = await fetch(API + "/jobs", {method: "POST", body: fd});
     if (!r.ok) throw new Error((await r.json()).detail || "Request failed");
@@ -154,7 +134,8 @@ async function poll(id) {
     const j = await (await fetch(`${API}/jobs/${id}`)).json();
     if (j.status === "error") { setStatus("Something went wrong: " + j.error, 0, true); $("go").disabled = false; return; }
     if (j.status === "done") { setStatus(`Done! ${j.clips.length} clips ready.`, 100); render(id, j.clips); $("go").disabled = false; return; }
-    const s = j.status.charAt(0).toUpperCase() + j.status.slice(1);
+    const st = j.status === "downloading" ? "preparing video" : j.status;
+    const s = st.charAt(0).toUpperCase() + st.slice(1);
     setStatus(s + "…", progress(j.status));
   } catch (e) { /* transient: retry */ }
   setTimeout(() => poll(id), 2500);
