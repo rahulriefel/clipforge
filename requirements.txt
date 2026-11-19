@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-multipart
+yt-dlp
+groq
+opencv-python-headless<5  # 4.x ships the face-detection model
+# optional, only if LLM_PROVIDER=anthropic:
+# anthropic
