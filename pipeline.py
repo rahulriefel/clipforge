@@ -11,7 +11,7 @@ import yt_dlp
 from groq import Groq
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")  # groq (free) | anthropic (paid)
-GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 CHUNK_CHARS = int(os.getenv("CHUNK_CHARS", "16000"))  # ~4k tokens per request, fits free limits
 YT_COOKIES = os.getenv("YTDLP_COOKIES_FILE")  # optional cookies.txt helps against YouTube blocks
@@ -95,6 +95,38 @@ Transcript:
 {transcript}"""
 
 
+GROQ_FALLBACK_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile",
+                        "llama-3.1-8b-instant"]
+_working_model: str | None = None
+
+
+def _ask_groq(prompt: str) -> str:
+    """Try the configured model, then fallbacks; Groq retires models often. Remembers what works."""
+    global _working_model
+    models = [m for m in dict.fromkeys([_working_model, GROQ_LLM_MODEL, *GROQ_FALLBACK_MODELS]) if m]
+    last = None
+    for model in models:
+        for json_mode in (True, False):
+            try:
+                kw = {"response_format": {"type": "json_object"}} if json_mode else {}
+                res = Groq().chat.completions.create(
+                    model=model, temperature=0.3, max_tokens=4000,
+                    messages=[{"role": "user", "content": prompt}], **kw)
+                _working_model = model
+                return res.choices[0].message.content or ""
+            except Exception as e:  # noqa: BLE001
+                msg = str(e)
+                if "429" in msg or "rate_limit" in msg or "rate limit" in msg.lower():
+                    raise
+                last = e
+                if "model_not_found" in msg or "does not exist" in msg or "decommissioned" in msg:
+                    break  # try next model
+                if "response_format" in msg or "json" in msg.lower():
+                    continue  # retry same model without JSON mode
+                break
+    raise RuntimeError(f"No Groq model available: {last}")
+
+
 def _ask_llm(prompt: str) -> str:
     """Send prompt to the configured LLM (free default: Groq). Retries on rate limits."""
     for attempt in range(5):
@@ -104,14 +136,9 @@ def _ask_llm(prompt: str) -> str:
                 msg = Anthropic().messages.create(model=CLAUDE_MODEL, max_tokens=2000,
                                                   messages=[{"role": "user", "content": prompt}])
                 return msg.content[0].text
-            res = Groq().chat.completions.create(
-                model=GROQ_LLM_MODEL, temperature=0.3, max_tokens=2000,
-                response_format={"type": "json_object"},
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return res.choices[0].message.content
+            return _ask_groq(prompt)
         except Exception as e:  # noqa: BLE001
-            if "429" in str(e) or "rate" in str(e).lower():
+            if "429" in str(e) or "rate_limit" in str(e) or "rate limit" in str(e).lower():
                 time.sleep(20 * (attempt + 1))  # free-tier tokens-per-minute limit
                 continue
             raise
